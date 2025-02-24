@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/auth';
+import axios from 'axios';
 
 export function Login() {
   const [email, setEmail] = useState('');
@@ -10,9 +11,18 @@ export function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: Implement actual login logic with Supabase
-    setUser({ id: '1', email, role: 'user' });
-    navigate('/challenges');
+    try {
+      const response = await axios.post('http://localhost:3000/login', {
+        username: email,
+        password
+      });
+      localStorage.setItem('token', response.data.accessToken);
+      setUser({ id: '1', email, role: 'user' });
+      navigate('/challenges');
+    } catch (error) {
+      console.error('Login failed:', error);
+      alert('Login failed. Please check your credentials.');
+    }
   };
 
   return (
