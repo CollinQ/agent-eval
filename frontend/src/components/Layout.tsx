@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/auth';
 import { Trophy, Code2, Home, User, LogOut } from 'lucide-react';
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -54,39 +55,14 @@ export function Layout({ children }: LayoutProps) {
               </div>
             </div>
             <div className="flex items-center">
-              {user ? (
-                <div className="flex items-center space-x-4">
-                  <Link
-                    to="/profile"
-                    className="flex items-center px-3 py-2 text-gray-900 hover:text-indigo-600"
-                  >
-                    <User className="h-5 w-5 mr-1" />
-                    Profile
-                  </Link>
-                  <button
-                    onClick={handleLogout}
-                    className="flex items-center px-3 py-2 text-gray-900 hover:text-indigo-600"
-                  >
-                    <LogOut className="h-5 w-5 mr-1" />
-                    Logout
-                  </button>
+              <SignedIn>
+                <UserButton afterSignOutUrl="/" />
+              </SignedIn>
+              <SignedOut>
+                <div className="text-gray-900 px-3 py-2 hover:text-indigo-600 cursor-pointer transition-colors">
+                  <SignInButton />
                 </div>
-              ) : (
-                <div className="flex items-center space-x-4">
-                  <Link
-                    to="/login"
-                    className="px-4 py-2 text-gray-900 hover:text-indigo-600"
-                  >
-                    Login
-                  </Link>
-                  <Link
-                    to="/register"
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                  >
-                    Register
-                  </Link>
-                </div>
-              )}
+              </SignedOut>
             </div>
           </div>
         </div>
