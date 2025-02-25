@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const evaluationRoutes = require('./evaluations');
 
 // Base API endpoint
 router.get('/', (req, res) => {
@@ -16,5 +17,8 @@ router.get('/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Mount evaluation routes
+router.use('/evaluations', evaluationRoutes);
 
 module.exports = router;
