@@ -15,7 +15,25 @@ const Agent = {
   },
   
   async findByUser(userId) {
-    return supabase.from('agents').select('*').eq('created_by', userId);
+    console.log('Finding agents for user:', userId);
+    
+    try {
+      const { data, error } = await supabase
+        .from('agents')
+        .select('*')
+        .eq('user_id', userId);
+      
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
+      
+      console.log('Found agents:', data);
+      return { data, error: null };
+    } catch (error) {
+      console.error('Error in findByUser:', error);
+      return { data: null, error };
+    }
   },
 
   async findAll() {

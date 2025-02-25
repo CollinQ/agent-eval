@@ -6,7 +6,10 @@ const Challenge = {
     },
     
     async findById(id) {
-      return supabase.from('challenges').select('*').eq('id', id);
+      console.log('Challenge.findById called with id:', id);
+      const result = await supabase.from('challenges').select('*').eq('id', id).single();
+      console.log('Supabase response for findById:', result);
+      return result;
     },
     
     async findByUser(userId) {
@@ -18,7 +21,9 @@ const Challenge = {
     },
     
     async findAll() {
-      return supabase.from('challenges').select('*');
+      const result = await supabase.from('challenges').select('*');
+      console.log('Supabase response for findAll:', result);
+      return result;
     },
     
     async update(id, updatedData) {
