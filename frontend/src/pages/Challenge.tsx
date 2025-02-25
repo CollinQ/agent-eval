@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Code2, Play, CheckCircle, XCircle } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { useUser } from '@clerk/clerk-react';
+import { getChallenge, createAgent, createEvaluation, type Challenge as ChallengeType } from '../services/api';
+import { AgentSelector } from '../components/AgentSelector';
 
 const sampleCode = `def agent_logic(env):
     """
@@ -17,140 +20,247 @@ const sampleCode = `def agent_logic(env):
 
 export function Challenge() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useUser();
+  const [challenge, setChallenge] = useState<ChallengeType | null>(null);
   const [code, setCode] = useState(sampleCode);
-  const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'failed'>(
-    'idle'
-  );
+  const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'failed'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>('');
+  const [submissionType, setSubmissionType] = useState<'new' | 'existing'>('new');
+  const [agentTitle, setAgentTitle] = useState<string>('');
+
+  useEffect(() => {
+    const fetchChallenge = async () => {
+      if (!id) return;
+      try {
+        console.log('Fetching challenge with id:', id);
+        const response = await getChallenge(id);
+        console.log('Challenge API response:', response);
+        setChallenge(response);
+      } catch (err) {
+        console.error('Error fetching challenge:', err);
+        setError('Failed to fetch challenge');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchChallenge();
+  }, [id]);
 
   const handleSubmit = async () => {
+    if (!challenge || !user) return;
+    
     setStatus('running');
-    // Simulate evaluation
-    setTimeout(() => {
-      setStatus(Math.random() > 0.5 ? 'success' : 'failed');
-    }, 3000);
+    setError(null);
+    
+    try {
+      let agentId: string;
+
+      if (submissionType === 'new') {
+        // Create a new agent
+        const agentResponse = await createAgent({
+          user_id: user.id,
+          name: agentTitle || `Agent for ${challenge.title}`,
+          description: `Auto-generated agent for challenge: ${challenge.title}`,
+          code: code
+        });
+        agentId = agentResponse.id;
+      } else {
+        // Use existing agent
+        agentId = selectedAgentId;
+      }
+
+      // Create an evaluation
+      await createEvaluation({
+        agent_id: agentId,
+        challenge_id: challenge.id
+      });
+
+      setStatus('success');
+      // Navigate to profile page or evaluation details
+      navigate('/profile');
+    } catch (err) {
+      console.error('Error submitting agent:', err);
+      setStatus('failed');
+      setError('Failed to submit agent for evaluation');
+    }
   };
 
-  return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900 flex items-center">
-          <Code2 className="h-8 w-8 text-indigo-600 mr-3" />
-          Basic Form Submission Challenge
-        </h1>
-        <p className="mt-2 text-gray-600">
-          Write an AI agent that can fill out and submit a basic form.
-        </p>
-      </div>
+  if (loading) {
+    return <div className="text-center py-8">Loading challenge...</div>;
+  }
 
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-xl font-semibold mb-4">Challenge Details</h2>
-        <div className="space-y-4">
-          <div>
-            <h3 className="font-medium text-gray-700">Description</h3>
-            <p className="text-gray-600">
-              Create an agent that can fill out a form with name and email fields, then
-              submit it. The agent should handle basic form validation and confirm
-              successful submission.
-            </p>
+  if (error) {
+    return <div className="text-center py-8 text-red-600">{error}</div>;
+  }
+
+  if (!challenge) {
+    return <div className="text-center py-8">Challenge not found</div>;
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center">
+            <Code2 className="h-8 w-8 text-blue-600 mr-3" />
+            <h1 className="text-2xl font-bold">{challenge.title}</h1>
           </div>
-          <div>
-            <h3 className="font-medium text-gray-700">URL</h3>
-            <p className="text-gray-600">www.realevals.xyz/form-basic</p>
-          </div>
-          <div>
-            <h3 className="font-medium text-gray-700">Success Criteria</h3>
-            <p className="text-gray-600">
-              The page should display "Thank you for submitting!" after successful form
-              submission.
-            </p>
-          </div>
+          <span
+            className={`px-3 py-1 rounded-full text-sm font-medium ${
+              challenge.difficulty === 'Easy'
+                ? 'bg-green-100 text-green-800'
+                : challenge.difficulty === 'Medium'
+                ? 'bg-yellow-100 text-yellow-800'
+                : 'bg-red-100 text-red-800'
+            }`}
+          >
+            {challenge.difficulty}
+          </span>
+        </div>
+
+        <div className="prose max-w-none mb-6">
+          <h2 className="text-lg font-semibold mb-2">Description</h2>
+          <p className="text-gray-600">{challenge.description}</p>
+
+          <h2 className="text-lg font-semibold mt-4 mb-2">Success Criteria</h2>
+          <p className="text-gray-600">{challenge.success_criteria}</p>
+
+          <h2 className="text-lg font-semibold mt-4 mb-2">Challenge URL</h2>
+          <a
+            href={challenge.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline"
+          >
+            {challenge.url}
+          </a>
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">Submit Your Agent</h2>
-          <div className="flex items-center space-x-2">
-            {status === 'running' && (
-              <span className="text-yellow-600">Evaluating...</span>
-            )}
-            {status === 'success' && (
-              <span className="text-green-600 flex items-center">
-                <CheckCircle className="h-5 w-5 mr-1" />
-                Success
-              </span>
-            )}
-            {status === 'failed' && (
-              <span className="text-red-600 flex items-center">
-                <XCircle className="h-5 w-5 mr-1" />
-                Failed
-              </span>
-            )}
+      <div className="bg-white rounded-lg shadow-lg p-6">
+        <h2 className="text-xl font-bold mb-4">Submit Your Agent</h2>
+        
+        <div className="mb-6">
+          <div className="flex space-x-4 mb-4">
             <button
-              onClick={handleSubmit}
-              disabled={status === 'running'}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+              onClick={() => setSubmissionType('new')}
+              className={`px-4 py-2 rounded-md ${
+                submissionType === 'new'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
             >
-              <Play className="h-4 w-4 mr-2" />
-              Run Agent
+              Write New Agent
+            </button>
+            <button
+              onClick={() => setSubmissionType('existing')}
+              className={`px-4 py-2 rounded-md ${
+                submissionType === 'existing'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Use Existing Agent
             </button>
           </div>
-        </div>
-        <div className="relative">
-          <SyntaxHighlighter
-            language="python"
-            style={tomorrow}
-            customStyle={{
-              margin: 0,
-              borderRadius: '0.5rem',
-              maxHeight: '400px',
-            }}
-          >
-            {code}
-          </SyntaxHighlighter>
-          <textarea
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-text"
-            spellCheck="false"
-          />
-        </div>
-      </div>
 
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-xl font-semibold mb-4">Evaluation Results</h2>
-        <div className="space-y-4">
-          <div>
-            <h3 className="font-medium text-gray-700">Metrics</h3>
-            <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-sm font-medium text-gray-500">Steps Taken</p>
-                <p className="mt-1 text-2xl font-semibold text-gray-900">3</p>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-sm font-medium text-gray-500">Accuracy</p>
-                <p className="mt-1 text-2xl font-semibold text-gray-900">100%</p>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-sm font-medium text-gray-500">Time Elapsed</p>
-                <p className="mt-1 text-2xl font-semibold text-gray-900">1.2s</p>
+          {submissionType === 'new' ? (
+            <div className="mb-4">
+              <SyntaxHighlighter
+                language="python"
+                style={tomorrow}
+                className="rounded-lg"
+                customStyle={{
+                  padding: '1rem',
+                  fontSize: '0.9rem',
+                  backgroundColor: '#f8f9fa',
+                }}
+              >
+                {code}
+              </SyntaxHighlighter>
+              <div className="mt-4">
+                <label htmlFor="agent-title" className="block text-sm font-medium text-gray-700 mb-2">
+                  Agent Title
+                </label>
+                <input
+                  type="text"
+                  id="agent-title"
+                  value={agentTitle}
+                  onChange={(e) => setAgentTitle(e.target.value)}
+                  placeholder="Enter a name for your agent"
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
               </div>
             </div>
-          </div>
-          <div>
-            <h3 className="font-medium text-gray-700">Execution Log</h3>
-            <div className="mt-2 bg-gray-50 rounded-lg p-4">
-              <pre className="text-sm text-gray-600 whitespace-pre-wrap">
-                {`[INFO] Starting agent execution...
-[INFO] Navigating to www.realevals.xyz/form-basic
-[INFO] Found form elements
-[INFO] Filling in name field
-[INFO] Filling in email field
-[INFO] Clicking submit button
-[SUCCESS] Form submitted successfully`}
-              </pre>
+          ) : (
+            <div className="mb-4">
+              <AgentSelector
+                onAgentSelect={setSelectedAgentId}
+                selectedAgentId={selectedAgentId}
+              />
             </div>
-          </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between">
+          <button
+            onClick={handleSubmit}
+            disabled={status === 'running' || (submissionType === 'existing' && !selectedAgentId)}
+            className={`inline-flex items-center px-4 py-2 rounded-md text-white ${
+              status === 'running' || (submissionType === 'existing' && !selectedAgentId)
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700'
+            }`}
+          >
+            {status === 'running' ? (
+              <>
+                <svg
+                  className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                Processing...
+              </>
+            ) : (
+              <>
+                <Play className="mr-2 h-5 w-5" />
+                {submissionType === 'new' ? 'Submit New Agent' : 'Run Selected Agent'}
+              </>
+            )}
+          </button>
+
+          {status === 'success' && (
+            <div className="flex items-center text-green-600">
+              <CheckCircle className="mr-2 h-5 w-5" />
+              Submitted successfully!
+            </div>
+          )}
+
+          {status === 'failed' && (
+            <div className="flex items-center text-red-600">
+              <XCircle className="mr-2 h-5 w-5" />
+              Submission failed
+            </div>
+          )}
         </div>
       </div>
     </div>

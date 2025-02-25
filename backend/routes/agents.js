@@ -10,15 +10,15 @@ const {
   getAgentsByUser
 } = require('../controllers/agentsController');
 
+// Separate route for getting agents by user
+router.get('/user', getAgentsByUser);
+
 router.get('/', async (req, res) => {
-  const userId = req.query.userId;
   const challengeId = req.query.challengeId;
   const agentId = req.query.agentId;
 
   if (challengeId) {
     await getAgentsByChallenge(req, res);
-  } else if (userId) {
-    await getAgentsByUser(req, res);
   } else if (agentId) {
     req.params.id = agentId;
     await getAgent(req, res);
