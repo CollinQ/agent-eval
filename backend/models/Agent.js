@@ -3,7 +3,35 @@ const { findAll } = require('./Challenge');
 
 const Agent = {
   async create(agentData) {
-    return supabase.from('agents').insert(agentData);
+    console.log('Agent.create called with:', agentData);
+    try {
+      // Ensure required fields are present
+      const requiredFields = ['user_id', 'code'];
+      const missingFields = requiredFields.filter(field => !agentData[field]);
+      
+      if (missingFields.length > 0) {
+        console.error('Missing required fields:', missingFields);
+        throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+      }
+
+      // Add created_at if not provided
+      const dataToInsert = {
+        ...agentData,
+        created_at: new Date().toISOString()
+      };
+
+      console.log('Inserting agent with data:', dataToInsert);
+      const response = await supabase
+        .from('agents')
+        .insert(dataToInsert)
+        .select(); // Add select() to return the inserted row
+
+      console.log('Supabase response:', response);
+      return response;
+    } catch (error) {
+      console.error('Error in Agent.create:', error);
+      return { data: null, error };
+    }
   },
   
   async findById(id) {
