@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Code2, Trophy, Users } from 'lucide-react';
+import { SignInButton, SignedOut, SignedIn } from '@clerk/clerk-react';
 
 export function Home() {
   return (
@@ -25,12 +26,16 @@ export function Home() {
             Choose from various difficulty levels and submit your AI agents to solve web
             automation tasks.
           </p>
-          <Link
-            to="/challenges"
-            className="text-indigo-600 hover:text-indigo-800 font-medium"
-          >
-            Browse Challenges →
-          </Link>
+          <SignedIn>
+            <Link
+              to="/challenges"
+              className="text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+              Browse Challenges →
+            </Link>
+          </SignedIn>
+          <SignedOut>
+          </SignedOut>
         </div>
 
         <div className="bg-white p-6 rounded-lg shadow-md">
@@ -59,12 +64,14 @@ export function Home() {
             Connect with other developers, share insights, and learn from the community's
             collective experience.
           </p>
-          <Link
-            to="/register"
-            className="text-indigo-600 hover:text-indigo-800 font-medium"
-          >
-            Get Started →
-          </Link>
+          <SignedOut>
+            <SignInButton
+              mode="modal">
+              <button className="text-indigo-600 hover:text-indigo-800 font-medium">
+                Get Started →
+              </button>
+            </SignInButton>
+          </SignedOut>
         </div>
       </div>
 
