@@ -61,7 +61,8 @@ export function Layout({ children }: LayoutProps) {
               </SignedIn>
               <SignedOut>
                 <div className="text-gray-900 px-3 py-2 hover:text-indigo-600 cursor-pointer transition-colors">
-                  <SignInButton />
+                  <SignInButton 
+                  mode="modal"/>
                 </div>
               </SignedOut>
             </div>
