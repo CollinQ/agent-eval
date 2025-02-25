@@ -6,8 +6,6 @@ import { Challenges } from './pages/Challenges';
 import { Challenge } from './pages/Challenge';
 import { Leaderboard } from './pages/Leaderboard';
 import { Profile } from './pages/Profile';
-import { Login } from './pages/Login';
-import { Register } from './pages/Register';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 function App() {
@@ -16,8 +14,6 @@ function App() {
       <Layout>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
           <Route
             path="/challenges"
             element={
