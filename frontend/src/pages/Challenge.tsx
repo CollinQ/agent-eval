@@ -6,6 +6,9 @@ import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useUser } from '@clerk/clerk-react';
 import { getChallenge, createAgent, createEvaluation, type Challenge as ChallengeType } from '../services/api';
 import { AgentSelector } from '../components/AgentSelector';
+import { Editor } from '@monaco-editor/react';
+import type { OnMount, OnChange } from '@monaco-editor/react';
+import { useRef } from 'react';
 
 const sampleCode = `def agent_logic(env):
     """
@@ -30,6 +33,16 @@ export function Challenge() {
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   const [submissionType, setSubmissionType] = useState<'new' | 'existing'>('new');
   const [agentTitle, setAgentTitle] = useState<string>('');
+
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+
+  const handleEditorDidMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
+  };
+
+  const handleEditorChange: OnChange = (value) => {
+    setCode(value || '');
+  };
 
   useEffect(() => {
     const fetchChallenge = async () => {
@@ -170,18 +183,39 @@ export function Challenge() {
 
           {submissionType === 'new' ? (
             <div className="mb-4">
-              <SyntaxHighlighter
+              <Editor
                 language="python"
-                style={tomorrow}
-                className="rounded-lg"
-                customStyle={{
-                  padding: '1rem',
-                  fontSize: '0.9rem',
-                  backgroundColor: '#f8f9fa',
+                height="300px"
+                width="100%"
+                defaultValue={sampleCode}
+                value={code}
+                theme="vs-dark"
+                onMount={handleEditorDidMount}
+                onChange={handleEditorChange}
+                options={{
+                  autoIndent: 'full',
+                  contextmenu: true,
+                  fontFamily: 'monospace',
+                  fontSize: 14,
+                  lineHeight: 24,
+                  minimap: { enabled: true },
+                  scrollbar: {
+                    horizontalSliderSize: 4,
+                    verticalSliderSize: 18,
+                  },
+                  selectOnLineNumbers: true,
+                  roundedSelection: false,
+                  readOnly: false,
+                  cursorStyle: 'line',
+                  automaticLayout: true,
+                  wordWrap: 'on',
+                  lineNumbers: 'on',
+                  folding: true,
+                  renderLineHighlight: 'all',
+                  scrollBeyondLastLine: false,
+                  tabSize: 2
                 }}
-              >
-                {code}
-              </SyntaxHighlighter>
+              />
               <div className="mt-4">
                 <label htmlFor="agent-title" className="block text-sm font-medium text-gray-700 mb-2">
                   Agent Title
