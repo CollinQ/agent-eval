@@ -12,11 +12,36 @@ const getAgents = async (req, res) => {
 
 const createAgent = async (req, res) => {
   try {
+    console.log('Creating agent with data:', req.body);
+    
+    // Validate required fields
+    const { user_id, name, code } = req.body;
+    if (!user_id || !code) {
+      console.error('Missing required fields:', { user_id: !!user_id, code: !!code });
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        details: {
+          user_id: !user_id ? 'User ID is required' : null,
+          code: !code ? 'Code is required' : null
+        }
+      });
+    }
+
     const { data, error } = await Agent.create(req.body);
-    if (error) throw error;
-    res.status(201).json(data);
+    
+    if (error) {
+      console.error('Error creating agent:', error);
+      throw error;
+    }
+    
+    console.log('Agent created successfully:', data);
+    res.status(201).json(data[0]); // Supabase returns an array for inserts
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Exception in createAgent:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Error occurred while creating the agent'
+    });
   }
 };
 
