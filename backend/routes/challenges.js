@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getChallenges, createChallenge, getChallengeById, updateChallenge, deleteChallenge } = require('../controllers/challenges');
+const { getChallenges, createChallenge, getChallengeById, updateChallenge, deleteChallenge } = require('../controllers/challengesController');
 
 router.post('/', createChallenge);
 router.get('/', async (req, res) => {

@@ -4,6 +4,9 @@ const cookieParser = require('cookie-parser');
 const logger = require('morgan');
 
 const indexRouter = require('./routes/index');
+const agentsRouter = require('./routes/agents');
+const challengesRouter = require('./routes/challenges');
+const evaluationsRouter = require('./routes/evaluations');
 
 const app = express();
 
@@ -15,6 +18,9 @@ app.use(cookieParser());
 
 // API Routes
 app.use('/api', indexRouter);
+app.use('/api/agents', agentsRouter);
+app.use('/api/challenges', challengesRouter);
+app.use('/api/evaluations', evaluationsRouter);
 
 // Error Handling
 app.use((err, req, res, next) => {
