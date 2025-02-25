@@ -1,16 +1,20 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { useAuthStore } from '../store/auth';
+import { useAuth } from '@clerk/clerk-react';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user } = useAuthStore();
+  const { isLoaded, isSignedIn } = useAuth();
 
-  if (!user) {
-    return <Navigate to="/login" replace />;
+  if (!isLoaded) {
+    return null;
+  }
+
+  if (!isSignedIn) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
