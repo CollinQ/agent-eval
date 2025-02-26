@@ -31,10 +31,55 @@ export function Challenge() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
+  const [agentFile, setAgentFile] = useState<File | null>(null);
   const [submissionType, setSubmissionType] = useState<'new' | 'existing'>('new');
   const [agentTitle, setAgentTitle] = useState<string>('');
 
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setAgentFile(file);
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        if (content) {
+          setCode(content);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.name.endsWith('.py')) {
+        setAgentFile(file);
+        
+        // Read the file contents
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const content = e.target?.result as string;
+          if (content) {
+            setCode(content);
+          }
+        };
+        reader.readAsText(file);
+      }
+    }
+  };
 
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -182,40 +227,51 @@ export function Challenge() {
           </div>
 
           {submissionType === 'new' ? (
-            <div className="mb-4">
-              <Editor
-                language="python"
-                height="300px"
-                width="100%"
-                defaultValue={sampleCode}
-                value={code}
-                theme="vs-dark"
-                onMount={handleEditorDidMount}
-                onChange={handleEditorChange}
-                options={{
-                  autoIndent: 'full',
-                  contextmenu: true,
-                  fontFamily: 'monospace',
-                  fontSize: 14,
-                  lineHeight: 24,
-                  minimap: { enabled: true },
-                  scrollbar: {
-                    horizontalSliderSize: 4,
-                    verticalSliderSize: 18,
-                  },
-                  selectOnLineNumbers: true,
-                  roundedSelection: false,
-                  readOnly: false,
-                  cursorStyle: 'line',
-                  automaticLayout: true,
-                  wordWrap: 'on',
-                  lineNumbers: 'on',
-                  folding: true,
-                  renderLineHighlight: 'all',
-                  scrollBeyondLastLine: false,
-                  tabSize: 2
+            <div
+              className="mb-4"
+            >
+              <div
+                style={{
+                  minHeight: '300px',
+                  maxHeight: '800px',
+                  height: '400px',
                 }}
-              />
+                className="resize-y overflow-auto border border-gray-300 rounded-md"
+                >
+                  <Editor
+                    language="python"
+                    height="100%"
+                    width="100%"
+                    defaultValue={sampleCode}
+                    value={code}
+                    theme="vs-dark"
+                    onMount={handleEditorDidMount}
+                    onChange={handleEditorChange}
+                    options={{
+                      autoIndent: 'full',
+                      contextmenu: true,
+                      fontFamily: 'monospace',
+                      fontSize: 14,
+                      lineHeight: 24,
+                      minimap: { enabled: true },
+                      scrollbar: {
+                        horizontalSliderSize: 4,
+                        verticalSliderSize: 18,
+                      },
+                      selectOnLineNumbers: true,
+                      roundedSelection: false,
+                      readOnly: false,
+                      cursorStyle: 'line',
+                      automaticLayout: true,
+                      wordWrap: 'on',
+                      lineNumbers: 'on',
+                      folding: true,
+                      renderLineHighlight: 'all',
+                      scrollBeyondLastLine: false,
+                      tabSize: 2
+                    }}
+                  />
+              </div>
               <div className="mt-4">
                 <label htmlFor="agent-title" className="block text-sm font-medium text-gray-700 mb-2">
                   Agent Title
@@ -228,6 +284,34 @@ export function Challenge() {
                   placeholder="Enter a name for your agent"
                   className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 />
+              </div>
+              <div 
+                className="mt-4 border-2 border-dashed border-gray-300 rounded-md p-6 flex flex-col items-center"
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+              >
+                <input
+                  type="file"
+                  id="python-file"
+                  accept=".py"
+                  onChange={handleFileUpload}
+                  ref={fileInputRef}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Upload Python File
+                </button>
+                {agentFile ? (
+                  <p className="mt-2 text-sm text-gray-600">
+                    {agentFile.name} ({Math.round(agentFile.size / 1024)} KB)
+                  </p>
+                ) : (
+                  <p className="mt-2 text-sm text-gray-600">or drag and drop a .py file here</p>
+                )}
               </div>
             </div>
           ) : (
