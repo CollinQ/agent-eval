@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, Award, Clock, Code2 } from 'lucide-react';
+import { Award, Clock, Code2, User } from 'lucide-react';
 import { useUser, UserProfile } from '@clerk/clerk-react';
 
 export function Profile() {
@@ -15,9 +15,20 @@ export function Profile() {
       <div className="bg-white rounded-lg shadow-md p-6">
         <div className="flex items-start space-x-6">
           <div className="flex-shrink-0">
-            <div className="h-24 w-24 rounded-full bg-indigo-100 flex items-center justify-center">
-              <User className="h-12 w-12 text-indigo-600" />
-            </div>
+            {user?.imageUrl ? (
+              <img
+                src={user.imageUrl}
+                alt={`${user.firstName}'s profile`}
+                className="h-24 w-24 rounded-full"
+              />
+            ) : (
+              <div className="h-24 w-24 bg-indigo-100 rounded-full flex items-center justify-center">
+                <span className="text-indigo-600 font-semibold">
+                  {user?.firstName?.charAt(0) || ''}
+                  {user?.lastName?.charAt(0) || ''}
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex-1">
             <h1 className="text-2xl font-bold text-gray-900">{user?.firstName} {user?.lastName}</h1>
@@ -37,31 +48,43 @@ export function Profile() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex items-center justify-between">
+        <div className="bg-white rounded-lg shadow-md p-5 h-full flex flex-col">
+          <div className="mb-3 flex flex-col items-start">
+            <div className="p-1.5 mb-2 rounded-md bg-indigo-50">
+              <Award className="h-4 w-4 text-indigo-600" />
+            </div>
             <h2 className="text-lg font-semibold text-gray-900">Success Rate</h2>
-            <Award className="h-5 w-5 text-indigo-600" />
           </div>
-          <p className="mt-2 text-3xl font-bold text-gray-900">92%</p>
-          <p className="text-sm text-gray-500">Across all challenges</p>
+          <div className="mt-auto">
+            <p className="text-3xl font-bold text-gray-900">92%</p>
+            <p className="mt-1 text-xs text-gray-500">Across all challenges</p>
+          </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Challenges Completed</h2>
-            <Code2 className="h-5 w-5 text-indigo-600" />
+        <div className="bg-white rounded-lg shadow-md p-5 h-full flex flex-col">
+          <div className="mb-3 flex flex-col items-start">
+            <div className="p-1.5 mb-2 rounded-md bg-indigo-50">
+              <Code2 className="h-4 w-4 text-indigo-600" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Challenges</h2>
           </div>
-          <p className="mt-2 text-3xl font-bold text-gray-900">24</p>
-          <p className="text-sm text-gray-500">Out of 30 total challenges</p>
+          <div className="mt-auto">
+            <p className="text-3xl font-bold text-gray-900">24</p>
+            <p className="mt-1 text-xs text-gray-500">Out of 30 total challenges</p>
+          </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Average Time</h2>
-            <Clock className="h-5 w-5 text-indigo-600" />
+        <div className="bg-white rounded-lg shadow-md p-5 h-full flex flex-col">
+          <div className="mb-3 flex flex-col items-start">
+            <div className="p-1.5 mb-2 rounded-md bg-indigo-50">
+              <Clock className="h-4 w-4 text-indigo-600" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Avg Time</h2>
           </div>
-          <p className="mt-2 text-3xl font-bold text-gray-900">1.8s</p>
-          <p className="text-sm text-gray-500">Per challenge completion</p>
+          <div className="mt-auto">
+            <p className="text-3xl font-bold text-gray-900">1.8s</p>
+            <p className="mt-1 text-xs text-gray-500">Per challenge completion</p>
+          </div>
         </div>
       </div>
 
