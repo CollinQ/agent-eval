@@ -9,14 +9,6 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { signOut } = useClerk();
-  const navigate = useNavigate();
-
-  const handleLogout = () => {
-    signOut().then(() => {
-      navigate('/');
-    })
-  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -57,7 +49,8 @@ export function Layout({ children }: LayoutProps) {
             </div>
             <div className="flex items-center">
               <SignedIn>
-                <UserButton afterSignOutUrl="/" />
+                <UserButton afterSignOutUrl="/" userProfileUrl="/profile">
+                </UserButton>
               </SignedIn>
               <SignedOut>
                 <div className="text-gray-900 px-3 py-2 hover:text-indigo-600 cursor-pointer transition-colors">

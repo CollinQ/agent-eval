@@ -32,7 +32,7 @@ function App() {
           />
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route
-            path="/profile"
+            path="/profile/*"
             element={
               <ProtectedRoute>
                 <Profile />
