@@ -9,6 +9,7 @@ import { Profile } from './pages/Profile';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Evaluation } from './pages/Evaluation';
 import { Evaluations } from './pages/Evaluations';
+import { MyAgents } from './pages/MyAgents';
 
 function App() {
   return (
@@ -38,6 +39,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Profile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/myagents"
+            element={
+              <ProtectedRoute>
+                <MyAgents />
               </ProtectedRoute>
             }
           />
