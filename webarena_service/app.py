@@ -11,7 +11,7 @@ import tempfile
 import importlib.util
 import traceback
 from typing import Any, Dict, List, Optional, Callable
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
@@ -123,10 +123,13 @@ class EvaluationRequest(BaseModel):
 class EvaluationResponse(BaseModel):
     evaluation_id: str
     status: str
-    score: int
-    result: dict | None
+    score: Optional[int] = None
+    steps_taken: Optional[int] = None
+    result: Optional[Dict] = None
+    message: Optional[str] = None
 
 def init_webarena_env(headless=True):
+    from browser_env import ScriptBrowserEnv
     return ScriptBrowserEnv(
         headless=headless,
         observation_type="accessibility_tree",
@@ -155,9 +158,11 @@ def successful(obs, success_criteria):
 def callback(callback_url: str, response: EvaluationResponse):
     print(color_text(f"Callback received: {response}", BLUE))
     try:
-        response = requests.post(callback_url, json=response.model_dump())
+        response_dict = response.model_dump()
+        print(color_text(f"Sending callback to {callback_url}: {response_dict}", BLUE))
+        response = requests.post(callback_url, json=response_dict)
     except Exception as e:
-        print(color_text(f"Error parsing callback response: {e}", RED))
+        print(color_text(f"Error sending callback: {e}", RED))
         return
 
 def test_interactive_elements(request: EvaluationRequest):
@@ -167,7 +172,10 @@ def test_interactive_elements(request: EvaluationRequest):
 
     response = EvaluationResponse(
         evaluation_id=request.evaluation_id,
-        status="failed",)
+        status="failed",
+        score=0,
+        steps_taken=0,
+        result=None)
     
     # Initialize environment
     print(color_text("Initializing WebArena environment...", BLUE))
@@ -180,14 +188,13 @@ def test_interactive_elements(request: EvaluationRequest):
     )
     print(color_text("Environment initialized", GREEN))
     
-    # Navigate to the URL
-    print(color_text(f"Navigating to {url} using id_based_action", BLUE))
+    # First reset without URL
     obs, info = env.reset()
 
-    print(color_text(f"Navigating to {url} using id_based_action", BLUE))
+    print(color_text(f"Navigating to {request.challenge_url} using id_based_action", BLUE))
     try:
         obs, reward, terminated, truncated, info = env.step(
-            create_id_based_action(f"goto [{url}]")
+            create_id_based_action(f"goto [{request.challenge_url}]")
         )
         print(color_text("Navigation initiated successfully", GREEN))
     except Exception as e:
@@ -202,7 +209,7 @@ def test_interactive_elements(request: EvaluationRequest):
     # Try interacting with the page after it's loaded
     print(color_text("\nTrying to identify interactable elements...", BLUE))
 
-    agent_logic = load_agent_function(agent_code)
+    agent_logic = load_agent_function(request.agent_code)
 
     max_steps = 25
     for step in range(max_steps):
@@ -230,8 +237,12 @@ def test_interactive_elements(request: EvaluationRequest):
             
             print_observation(obs)
 
-            if successful(obs, 'No messages matched'):
+            if successful(obs, request.success_criteria):
                 print(color_text("Success criteria met!", GREEN))
+                response.status = "success"
+                response.score = 100
+                response.steps_taken = step + 1
+                response.result = obs
                 break
             else:
                 print(color_text("Success criteria not met :(", RED))
@@ -242,7 +253,8 @@ def test_interactive_elements(request: EvaluationRequest):
             print(color_text(f"Error executing agent: {str(e)}", RED))
             print(color_text(traceback.format_exc(), RED))
             break
-        
+
+    callback(request.callback_url, response)
     env.close()
     print(color_text("Test complete", GREEN))
     return None
@@ -257,22 +269,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/api/evaluate", response_model=EvaluationResponse)
-async def evaluate(request: EvaluationRequest, background_tasks: BackgroundTasks):
-    logger.info(f"Received evaluation request: {request.json()}")
+@app.post("/api/evaluate")
+async def evaluate(request: Request, background_tasks: BackgroundTasks):
+    # Debug the raw request
+    print(color_text("\n=== DEBUG: RECEIVED REQUEST ===", RED))
+    body = await request.body()
+    print(f"Raw request body (first 100 chars): {body[:100]}")
     
     try:
-        background_tasks.add_task(
-            lambda: test_interactive_elements(request)
+        # Try to decode and pretty print for debugging
+        text_body = body.decode('utf-8')
+        print(f"Body length: {len(text_body)} characters")
+        print(f"First 100 chars: {text_body[:100]}")
+        print(f"Characters around position 78: {text_body[70:90]}")
+        
+        # Try to parse as JSON
+        import json
+        try:
+            data = json.loads(text_body)
+            print("JSON parsing successful")
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {e}")
+            # Print the problematic section
+            error_pos = e.pos
+            print(f"Error at position {error_pos}")
+            print(f"Characters around error: {text_body[max(0, error_pos-10):min(len(text_body), error_pos+10)]}")
+            raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+        
+        # Parse the request data
+        eval_request = EvaluationRequest(
+            evaluation_id=data["evaluation_id"],
+            agent_code=data["agent_code"],
+            challenge_url=data["challenge_url"],
+            success_criteria=data["success_criteria"],
+            callback_url=data["callback_url"]
         )
+        
+        # Start the evaluation in the background
+        background_tasks.add_task(test_interactive_elements, eval_request)
+        
+        # Return a success response
         return EvaluationResponse(
-            evaluation_id=request.evaluation_id,
+            evaluation_id=eval_request.evaluation_id,
             status="running",
             message="Evaluation started successfully"
         )
+    
+    except KeyError as e:
+        # Missing required field
+        print(f"Missing required field: {e}")
+        raise HTTPException(status_code=400, detail=f"Missing required field: {str(e)}")
+    
     except Exception as e:
-        logger.error(f"Evaluation failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Unexpected error
+        print(f"Unexpected error: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn

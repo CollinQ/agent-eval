@@ -157,7 +157,7 @@ const evaluationController = {
   async evaluationCallback(req, res) {
     try {
       const { id } = req.params;
-      const { success, steps, screenshot, status } = req.body;
+      const { success, steps, status, result } = req.body;
       
       console.log(`Received callback for evaluation ${id}:`, req.body);
       
@@ -165,11 +165,7 @@ const evaluationController = {
         status: status || 'completed',
         score: success ? 100 : 0,  // Simple scoring: 100 for success, 0 for failure
         steps_taken: steps,
-        result: {
-          success,
-          screenshot,
-          ...req.body
-        }
+        result: result
       };
       
       const { data, error } = await Evaluation.update(id, updateData);
