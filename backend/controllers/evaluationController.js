@@ -22,7 +22,10 @@ const evaluationController = {
         status: 'queued',
       };
 
+      console.log("Evaluation Data:", evaluationData);
       const { data, error } = await Evaluation.create(evaluationData);
+
+      console.log("Evaluation Response:", { data, error });
       
       if (error) throw error;
       
