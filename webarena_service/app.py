@@ -5,16 +5,20 @@ import os
 import sys
 import json
 import base64
+import re
 import traceback
 import importlib.util
 import tempfile
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import logging
 import asyncio
 import requests
+import concurrent.futures
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+sys.path.append(os.path.join(os.path.dirname(__file__), 'webarena'))
 
 # Setup logging
 logging.basicConfig(
@@ -35,6 +39,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ThreadPoolExecutor for running sync code
+thread_pool = concurrent.futures.ThreadPoolExecutor()
 
 # Models
 class EvaluationRequest(BaseModel):
@@ -101,33 +108,106 @@ def load_agent_function(agent_code: str):
         raise
 
 
+# Function to find element IDs in accessibility tree based on selectors
+def find_element_id(selector: str, accessibility_tree: str) -> Optional[str]:
+    """Find element ID in accessibility tree that matches a CSS selector."""
+    # Remove the # or . prefix from the selector to get the element name or id
+    if selector.startswith('#'):
+        # ID selector - look for element with matching id
+        element_id = selector[1:]
+        
+        # Try to find elements with matching id or name
+        # Example pattern: [123] textbox 'name' or [123] textbox id='name'
+        patterns = [
+            rf'\[(\d+)\][^\[\]]*?id=[\'"]?{re.escape(element_id)}[\'"]?',
+            rf'\[(\d+)\][^\[\]]*?name=[\'"]?{re.escape(element_id)}[\'"]?',
+            rf'\[(\d+)\][^\[\]]*?[\'"]?{re.escape(element_id)}[\'"]?',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, accessibility_tree)
+            if match:
+                return match.group(1)
+    
+    elif selector.startswith('.'):
+        # Class selector - look for element with matching class
+        element_class = selector[1:]
+        # Find elements with matching class
+        pattern = rf'\[(\d+)\][^\[\]]*?class=[\'"]?.*?{re.escape(element_class)}.*?[\'"]?'
+        match = re.search(pattern, accessibility_tree)
+        if match:
+            return match.group(1)
+    
+    else:
+        # Tag selector - look for matching tag
+        tag = selector
+        # Find elements with matching tag
+        pattern = rf'\[(\d+)\] {re.escape(tag)}'
+        match = re.search(pattern, accessibility_tree)
+        if match:
+            return match.group(1)
+    
+    # If no match found, look for elements with similar text or role
+    fallback_patterns = [
+        # Look for elements containing the selector text in their name
+        rf'\[(\d+)\][^\[\]]*?[\'"].*?{re.escape(selector)}.*?[\'"]',
+        # Look for buttons/links with matching text
+        rf'\[(\d+)\] (?:button|link) [\'"].*?{re.escape(selector)}.*?[\'"]',
+        # Special case for common elements like submit buttons
+        rf'\[(\d+)\] button [\'"](?:submit|Search|Send|OK|Continue)[\'"]' if selector.lower() in ['submit', 'search', 'send', 'ok', 'continue'] else None,
+    ]
+    
+    for pattern in fallback_patterns:
+        if pattern:
+            match = re.search(pattern, accessibility_tree)
+            if match:
+                return match.group(1)
+    
+    logger.warning(f"Could not find element ID for selector: {selector}")
+    return None
+
+
 # Function to convert agent actions to WebArena format
-def convert_to_webarena_action(action, create_id_based_action_fn):
+def convert_to_webarena_action(action: Dict[str, Any], 
+                              create_id_based_action_fn, 
+                              accessibility_tree: str):
     """Convert agent-format action to WebArena format."""
     action_type = action.get("type")
     selector = action.get("selector")
     
+    # If the agent has already provided an element_id, use it directly
+    if "element_id" in action:
+        element_id = action["element_id"]
+    else:
+        # Otherwise, try to find the element ID based on the selector
+        element_id = find_element_id(selector, accessibility_tree)
+    
+    # If we couldn't find an element ID, log warning and use a fallback
+    if not element_id:
+        logger.warning(f"Could not find element ID for selector: {selector}")
+        # Fallback: Just use the selector as provided (this likely won't work but better than failing)
+        element_id = selector
+    
     if action_type == "click":
-        return create_id_based_action_fn(f"click {selector}")
+        return create_id_based_action_fn(f"click [{element_id}]")
     elif action_type == "input":
         value = action.get("value", "")
-        return create_id_based_action_fn(f"type {selector} {value}")
+        return create_id_based_action_fn(f"type [{element_id}] {value}")
     elif action_type == "select":
         value = action.get("value", "")
-        return create_id_based_action_fn(f"select {selector} {value}")
+        return create_id_based_action_fn(f"select [{element_id}] {value}")
     else:
         raise ValueError(f"Unsupported action type: {action_type}")
 
 
-# Evaluation function
-async def run_evaluation(
+# Synchronous evaluation function that will run in a thread
+def run_evaluation_sync(
     evaluation_id: str,
     agent_code: str,
     challenge_url: str,
-    success_criteria: str,
-    callback_url: str
+    success_criteria: str
 ):
-    """Run WebArena evaluation and send results back via callback."""
+    """Run WebArena evaluation synchronously (to be called from a thread)."""
     logger.info(f"Starting evaluation {evaluation_id} for URL: {challenge_url}")
     
     result = {
@@ -159,6 +239,9 @@ async def run_evaluation(
             # Get page observation
             text_obs = obs.get("text", "")
             
+            # Display observation for debugging
+            logger.info(f"Observation: {text_obs[:200]}...")
+            
             # Get actions from agent
             try:
                 actions = agent_function(text_obs)
@@ -170,8 +253,16 @@ async def run_evaluation(
                 
                 # Execute each action
                 for action in actions:
-                    # Convert to WebArena format
-                    webarena_action = convert_to_webarena_action(action, create_id_based_action_fn)
+                    logger.info(f"Agent action: {action}")
+                    
+                    # Convert to WebArena format using the accessibility tree
+                    webarena_action = convert_to_webarena_action(
+                        action, 
+                        create_id_based_action_fn,
+                        text_obs  # Pass the accessibility tree
+                    )
+                    
+                    logger.info(f"WebArena action: {webarena_action}")
                     
                     # Execute action
                     obs, reward, terminated, truncated, info = env.step(webarena_action)
@@ -188,6 +279,7 @@ async def run_evaluation(
                     
             except Exception as e:
                 logger.error(f"Error during agent execution: {e}")
+                logger.error(traceback.format_exc())
                 result["error"] = str(e)
                 break
         
@@ -208,15 +300,46 @@ async def run_evaluation(
         
     except Exception as e:
         logger.error(f"Evaluation error: {e}")
+        logger.error(traceback.format_exc())
         result["error"] = str(e)
         result["status"] = "failed"
-        
-    # Send callback
+    
+    return result
+
+
+# Async function to call the callback URL
+async def send_callback(callback_url: str, result: dict):
+    """Send the evaluation result to the callback URL."""
     try:
         response = requests.post(callback_url, json=result)
         logger.info(f"Callback response: {response.status_code}, {response.text}")
     except Exception as e:
         logger.error(f"Callback error: {e}")
+
+
+# Async function that orchestrates the evaluation
+async def run_evaluation(
+    evaluation_id: str,
+    agent_code: str,
+    challenge_url: str,
+    success_criteria: str,
+    callback_url: str
+):
+    """Run evaluation in a thread and send results via callback."""
+    loop = asyncio.get_running_loop()
+    
+    # Run the sync evaluation in a thread
+    result = await loop.run_in_executor(
+        thread_pool,
+        run_evaluation_sync,
+        evaluation_id,
+        agent_code,
+        challenge_url,
+        success_criteria
+    )
+    
+    # Send callback
+    await send_callback(callback_url, result)
     
     return result
 
@@ -224,15 +347,11 @@ async def run_evaluation(
 # Routes
 @app.post("/api/evaluate", response_model=EvaluationResponse)
 async def evaluate(request: EvaluationRequest, background_tasks: BackgroundTasks):
-    """
-    Start a WebArena evaluation.
+    logger.info("Received evaluation request: %s", request.json())
+    logger.debug("Evaluation Data: %s", request.dict())
+    logger.info("Successfully processed evaluation for ID: %s", request.evaluation_id)
     
-    The evaluation will run in the background, and results will be sent
-    to the callback URL when complete.
-    """
     try:
-        logger.info(f"Received evaluation request: {request.evaluation_id}")
-        
         # Add evaluation to background tasks
         background_tasks.add_task(
             run_evaluation,
@@ -243,13 +362,16 @@ async def evaluate(request: EvaluationRequest, background_tasks: BackgroundTasks
             callback_url=request.callback_url
         )
         
+        logger.info("Evaluation request added to background tasks")
+        logger.info("Sending response to client")
+        
         return EvaluationResponse(
             evaluation_id=request.evaluation_id,
             status="running",
             message="Evaluation started successfully"
         )
     except Exception as e:
-        logger.error(f"Error starting evaluation: {e}")
+        logger.error("Error processing evaluation: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
