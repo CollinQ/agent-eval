@@ -20,4 +20,7 @@ router.get('/leaderboard/:challengeId', evaluationController.getLeaderboard);
 // Update an evaluation (for updating status, score, etc.)
 router.patch('/:id', evaluationController.updateEvaluation);
 
+// Callback endpoint for WebArena microservice
+router.post('/:id/callback', evaluationController.evaluationCallback);
+
 module.exports = router;
