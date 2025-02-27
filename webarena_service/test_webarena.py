@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-Improved WebArena Tester - Uses the correct navigation methods confirmed to work
+Improved WebArena Tester - Tool to investigate how WebArena processes actions and observations.
+
+Usage:
+    python improved_test_webarena.py <challenge_url> <agent_file_path>
+
+Example:
+    python improved_test_webarena.py https://evals-gomail.vercel.app/ ./my_agent.py
 """
 
 import os
@@ -99,7 +105,6 @@ def format_action_for_display(action: Dict[str, Any]) -> str:
 def find_element_ids(text: str, keyword: str) -> List[str]:
     """Find potential element IDs in the accessibility tree based on a keyword."""
     results = []
-    print(color_text(f"Searching for elements matching '{keyword}'...", BLUE))
     
     # Look for IDs of elements containing the keyword
     patterns = [
@@ -113,21 +118,76 @@ def find_element_ids(text: str, keyword: str) -> List[str]:
     
     for pattern in patterns:
         for match in re.finditer(pattern, text, re.IGNORECASE):
-            element_id = match.group(1)
-            element_text = match.group(0)
-            results.append(element_id)
-            print(color_text(f"  Found element [{element_id}]: {element_text}", GREEN))
-    
-    if not results:
-        print(color_text(f"  No elements found matching '{keyword}'", YELLOW))
+            results.append(match.group(1))
     
     return results
+
+def attempt_actions_with_element_ids(env, action_type: str, element_ids: List[str], extra_args: str = "") -> Optional[Dict]:
+    """Try different element IDs with different action commands until one works."""
+    from browser_env import create_id_based_action
+
+    # Define variations of commands to try
+    if action_type == "click":
+        commands = ["click"]
+    elif action_type == "input":
+        commands = ["fill", "type", "input"]
+    elif action_type == "select":
+        commands = ["select"]
+    else:
+        commands = [action_type]
+    
+    # Try each command with each element ID
+    for command in commands:
+        for element_id in element_ids:
+            action_str = f"{command} [{element_id}]{' ' + extra_args if extra_args else ''}"
+            try:
+                print(color_text(f"Trying action: {action_str}", BLUE))
+                action = create_id_based_action(action_str)
+                
+                # Try to execute the action
+                obs, reward, terminated, truncated, info = env.step(action)
+                print(color_text(f"✓ Action succeeded: {action_str}", GREEN))
+                return obs, reward, terminated, truncated, info
+            except Exception as e:
+                print(color_text(f"✗ Action failed: {action_str}", RED))
+                print(color_text(f"  Error: {str(e)}", RED))
+    
+    print(color_text(f"All action attempts failed", RED))
+    return None
+
+def wait_for_page_load(env, timeout=60):
+    """Wait for the page to fully load and return observation."""
+    print(color_text(f"Waiting for page to load (up to {timeout}s)...", BLUE))
+    
+    start_time = time.time()
+    
+    while time.time() - start_time < timeout:
+        # Get current observation
+        obs = env.observation()
+        text_obs = obs.get("text", "")
+        
+        # Check if we're still on about:blank
+        if "url: about:blank" in text_obs:
+            print(color_text("Still on about:blank, waiting...", YELLOW))
+            time.sleep(1)
+            continue
+        
+        # Check if the page has actual content
+        if len(text_obs.split('\n')) > 5:  # If we have more than 5 lines, it probably loaded
+            print(color_text(f"Page appears to be loaded after {time.time() - start_time:.1f}s", GREEN))
+            return obs
+        
+        # Wait a bit and try again
+        time.sleep(1)
+    
+    print(color_text(f"Warning: Timeout after {timeout}s waiting for page load", RED))
+    return env.observation()
 
 def test_webarena(challenge_url: str, agent_file_path: str):
     """Test WebArena with a challenge URL and agent file."""
     try:
-        # Import WebArena components - using the two confirmed working methods
-        from browser_env import ScriptBrowserEnv, create_id_based_action, create_playwright_action
+        # Import WebArena components
+        from browser_env import ScriptBrowserEnv, create_id_based_action
         print(color_text("Successfully imported WebArena components", GREEN))
         
         # Load the agent
@@ -136,81 +196,27 @@ def test_webarena(challenge_url: str, agent_file_path: str):
         # Initialize WebArena environment
         print(color_text("Initializing WebArena environment...", BLUE))
         env = ScriptBrowserEnv(
-            headless=False,  # Set to True in production
-            slow_mo=300,     # Slow down for visibility
+            headless=False,
+            slow_mo=100,  # Slow down for visibility
             observation_type="accessibility_tree",
             current_viewport_only=True,
             viewport_size={"width": 1280, "height": 720},
         )
         print(color_text("WebArena environment initialized", GREEN))
         
-        # NAVIGATION METHOD 1: Using create_playwright_action (confirmed working)
-        print(color_text(f"Navigating to {challenge_url} using Playwright action", BLUE))
-        try:
-            # First reset without URL - we'll navigate directly
-            obs, info = env.reset()
-            
-            # Now use Playwright action for navigation
-            obs, reward, terminated, truncated, info = env.step(
-                create_playwright_action(f'page.goto("{challenge_url}", {{waitUntil: "networkidle"}})')
-            )
-            print(color_text("Navigation successful via playwright action", GREEN))
-        except Exception as e:
-            print(color_text(f"Error using playwright navigation: {e}", RED))
-            print(color_text("Trying alternative navigation method...", YELLOW))
-            
-            # NAVIGATION METHOD 2: Using create_id_based_action with goto (confirmed working)
-            try:
-                obs, info = env.reset()
-                obs, reward, terminated, truncated, info = env.step(
-                    create_id_based_action(f"goto [{challenge_url}]")
-                )
-                print(color_text("Navigation successful via id_based goto action", GREEN))
-            except Exception as e:
-                print(color_text(f"All navigation methods failed: {e}", RED))
-                print(traceback.format_exc())
-                return
+        # Navigate to the challenge URL
+        print(color_text(f"Navigating to {challenge_url}", BLUE))
+        obs, info = env.reset(options={"url": challenge_url})
         
-        # Wait a moment for page to fully load
-        print(color_text("Waiting for page to fully load (5 seconds)...", BLUE))
-        time.sleep(5)
+        # Wait for the page to fully load
+        obs = wait_for_page_load(env)
         
-        # Check if we're on about:blank (common issue)
+        # Print the initial accessibility tree
         text_obs = obs.get("text", "")
-        if "url: about:blank" in text_obs:
-            print(color_text("WARNING: Still on about:blank after navigation", RED))
-            print(color_text("Trying one more navigation attempt...", YELLOW))
-            try:
-                obs, reward, terminated, truncated, info = env.step(
-                    create_playwright_action(f'page.goto("{challenge_url}", {{timeout: 60000}})')
-                )
-                text_obs = obs.get("text", "")
-            except Exception as e:
-                print(color_text(f"Final navigation attempt failed: {e}", RED))
-        
-        # Print the accessibility tree
         print_accessibility_tree(text_obs)
         
-        # Test valid action formats
-        print(color_text("Testing valid WebArena action formats:", BLUE))
-        action_formats = [
-            "click [1]",
-            "type [1] Test text",
-            "fill [1] Test text", 
-            "input [1] Test text",
-            "noop"
-        ]
-        
-        for action_format in action_formats:
-            try:
-                action = create_id_based_action(action_format)
-                print(color_text(f"✓ Valid format: {action_format}", GREEN))
-            except Exception as e:
-                print(color_text(f"✗ Invalid format: {action_format}", RED))
-                print(color_text(f"  Error: {str(e)}", RED))
-        
         # Loop for interactive testing - repeat agent action cycle multiple times
-        max_steps = 5
+        max_steps = 10
         for step in range(max_steps):
             print(color_text(f"\n--- Step {step+1}/{max_steps} ---", MAGENTA))
             
@@ -223,11 +229,10 @@ def test_webarena(challenge_url: str, agent_file_path: str):
                 if not isinstance(actions, list):
                     print(color_text(f"Agent returned single action: {format_action_for_display(actions)}", YELLOW))
                     actions = [actions]
-                
-                # Display all returned actions
-                print(color_text(f"Agent returned {len(actions)} actions:", GREEN))
-                for i, action in enumerate(actions):
-                    print(color_text(f"Action {i+1}: {format_action_for_display(action)}", BLUE))
+                else:
+                    print(color_text(f"Agent returned {len(actions)} actions:", GREEN))
+                    for i, action in enumerate(actions):
+                        print(color_text(f"Action {i+1}: {format_action_for_display(action)}", BLUE))
                 
                 # Process just the first action
                 if actions and len(actions) > 0:
@@ -246,147 +251,82 @@ def test_webarena(challenge_url: str, agent_file_path: str):
                         element_id = action.get("element_id")
                         
                         if action_type == "click":
-                            try:
-                                webarena_action = create_id_based_action(f"click [{element_id}]")
-                                obs, reward, terminated, truncated, info = env.step(webarena_action)
-                                print(color_text(f"✓ Click action succeeded on element [{element_id}]", GREEN))
-                            except Exception as e:
-                                print(color_text(f"✗ Click action failed: {str(e)}", RED))
-                        
+                            action_str = f"click [{element_id}]"
                         elif action_type == "input":
                             value = action.get("value", "")
-                            success = False
-                            
-                            # Try all three input commands since different ones might work
-                            for cmd in ["fill", "type", "input"]:
+                            # Try all possible input commands
+                            for cmd in ["fill", "type", "input", "text"]:
                                 try:
-                                    print(color_text(f"Trying {cmd} command...", BLUE))
-                                    webarena_action = create_id_based_action(f"{cmd} [{element_id}] {value}")
+                                    action_str = f"{cmd} [{element_id}] {value}"
+                                    print(color_text(f"Trying: {action_str}", BLUE))
+                                    webarena_action = create_id_based_action(action_str)
                                     obs, reward, terminated, truncated, info = env.step(webarena_action)
-                                    print(color_text(f"✓ {cmd} action succeeded on element [{element_id}]", GREEN))
-                                    success = True
+                                    print(color_text(f"✓ Action succeeded: {action_str}", GREEN))
+                                    # If we got here, we found a working command
                                     break
                                 except Exception as e:
-                                    print(color_text(f"✗ {cmd} action failed: {str(e)}", RED))
-                            
-                            if not success:
-                                print(color_text("All input methods failed", RED))
-                        
+                                    print(color_text(f"✗ Failed with {cmd}: {str(e)}", RED))
+                            else:
+                                # If we get here, none of the commands worked
+                                print(color_text("All input commands failed", RED))
+                                break
                         else:
                             print(color_text(f"Unsupported action type: {action_type}", RED))
+                            break
                     
                     # Handle actions with selector
                     elif "selector" in action:
                         selector = action.get("selector", "")
+                        print(color_text(f"Finding elements matching '{selector}'...", BLUE))
+                        
                         # Extract the key part of the selector (remove # or . prefix)
                         key = selector.replace('#', '').replace('.', '')
-                        
-                        # Find matching elements
                         element_ids = find_element_ids(text_obs, key)
                         
                         if action_type == "click":
-                            if element_ids:
-                                # Try clicking each potential element
-                                success = False
-                                for element_id in element_ids:
-                                    try:
-                                        webarena_action = create_id_based_action(f"click [{element_id}]")
-                                        obs, reward, terminated, truncated, info = env.step(webarena_action)
-                                        print(color_text(f"✓ Click succeeded on element [{element_id}]", GREEN))
-                                        success = True
-                                        break
-                                    except Exception as e:
-                                        print(color_text(f"✗ Click failed on element [{element_id}]: {str(e)}", RED))
-                                
-                                if not success:
-                                    print(color_text("All click attempts failed", RED))
+                            if not element_ids:
+                                # Try looking for buttons or links
+                                print(color_text(f"No elements found matching '{key}', trying general button/link search", YELLOW))
+                                element_ids = find_element_ids(text_obs, "button") + find_element_ids(text_obs, "link")
                             
-                            # If no elements found by keyword, try looking for generic buttons/links
-                            elif not element_ids:
-                                print(color_text("Looking for generic clickable elements...", YELLOW))
-                                generic_elements = []
-                                for keyword in ["button", "link", "submit"]:
-                                    generic_elements.extend(find_element_ids(text_obs, keyword))
+                            if element_ids:
+                                print(color_text(f"Found {len(element_ids)} potential elements: {', '.join(element_ids)}", GREEN))
+                                result = attempt_actions_with_element_ids(env, "click", element_ids)
+                                if result:
+                                    obs, reward, terminated, truncated, info = result
+                            else:
+                                print(color_text("No suitable elements found for clicking", RED))
+                                break
                                 
-                                if generic_elements:
-                                    success = False
-                                    for element_id in generic_elements[:3]:  # Try first 3 only
-                                        try:
-                                            webarena_action = create_id_based_action(f"click [{element_id}]")
-                                            obs, reward, terminated, truncated, info = env.step(webarena_action)
-                                            print(color_text(f"✓ Click succeeded on generic element [{element_id}]", GREEN))
-                                            success = True
-                                            break
-                                        except Exception as e:
-                                            print(color_text(f"✗ Click failed on generic element [{element_id}]: {str(e)}", RED))
-                                    
-                                    if not success:
-                                        print(color_text("All generic click attempts failed", RED))
-                                else:
-                                    print(color_text("No clickable elements found", RED))
-                        
                         elif action_type == "input":
                             value = action.get("value", "")
                             
-                            if element_ids:
-                                # Try input with each potential element
-                                success = False
-                                for element_id in element_ids:
-                                    # Try different input commands
-                                    for cmd in ["fill", "type", "input"]:
-                                        try:
-                                            webarena_action = create_id_based_action(f"{cmd} [{element_id}] {value}")
-                                            obs, reward, terminated, truncated, info = env.step(webarena_action)
-                                            print(color_text(f"✓ {cmd} succeeded on element [{element_id}]", GREEN))
-                                            success = True
-                                            break
-                                        except Exception as e:
-                                            print(color_text(f"✗ {cmd} failed on element [{element_id}]: {str(e)}", RED))
-                                    
-                                    if success:
-                                        break
-                                
-                                if not success:
-                                    print(color_text("All input attempts failed", RED))
+                            if not element_ids:
+                                # Try looking for input fields
+                                print(color_text(f"No elements found matching '{key}', trying general input search", YELLOW))
+                                element_ids = find_element_ids(text_obs, "textbox") + find_element_ids(text_obs, "input")
                             
-                            # If no elements found by keyword, try looking for generic inputs
-                            elif not element_ids:
-                                print(color_text("Looking for generic input elements...", YELLOW))
-                                generic_elements = []
-                                for keyword in ["textbox", "input", "field"]:
-                                    generic_elements.extend(find_element_ids(text_obs, keyword))
-                                
-                                if generic_elements:
-                                    success = False
-                                    for element_id in generic_elements[:3]:  # Try first 3 only
-                                        # Try different input commands
-                                        for cmd in ["fill", "type", "input"]:
-                                            try:
-                                                webarena_action = create_id_based_action(f"{cmd} [{element_id}] {value}")
-                                                obs, reward, terminated, truncated, info = env.step(webarena_action)
-                                                print(color_text(f"✓ {cmd} succeeded on generic element [{element_id}]", GREEN))
-                                                success = True
-                                                break
-                                            except Exception as e:
-                                                print(color_text(f"✗ {cmd} failed on generic element [{element_id}]: {str(e)}", RED))
-                                        
-                                        if success:
-                                            break
-                                    
-                                    if not success:
-                                        print(color_text("All generic input attempts failed", RED))
-                                else:
-                                    print(color_text("No input elements found", RED))
-                        
-                        else:
-                            print(color_text(f"Unsupported action type: {action_type}", RED))
-                    
+                            if element_ids:
+                                print(color_text(f"Found {len(element_ids)} potential elements: {', '.join(element_ids)}", GREEN))
+                                result = attempt_actions_with_element_ids(env, "input", element_ids, value)
+                                if result:
+                                    obs, reward, terminated, truncated, info = result
+                            else:
+                                print(color_text("No suitable elements found for input", RED))
+                                break
                     else:
                         print(color_text("Action missing both element_id and selector", RED))
+                        break
+                else:
+                    print(color_text("Agent returned no actions", YELLOW))
+                    break
                 
-                # Get updated observation and print tree
+                # Get updated observation
                 text_obs = obs.get("text", "")
                 print_accessibility_tree(text_obs)
+                
+                # Pause to let user see what happened
+                time.sleep(1)
                 
             except Exception as e:
                 print(color_text(f"Error executing agent: {str(e)}", RED))
