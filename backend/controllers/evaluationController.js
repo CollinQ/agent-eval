@@ -77,7 +77,7 @@ const evaluationController = {
         });
       }
       
-      res.status(201).json(data);
+      res.status(201).json(data[0].id);
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

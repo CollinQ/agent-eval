@@ -132,14 +132,16 @@ export function Challenge() {
       }
 
       // Create an evaluation
-      await createEvaluation({
+      const evaluation = await createEvaluation({
         agent_id: agentId,
         challenge_id: challenge.id
       });
 
+      console.log('Evaluation created:', evaluation);
+
       setStatus('success');
       // Navigate to profile page or evaluation details
-      navigate('/profile');
+      navigate('/evaluation/' + evaluation.id);
     } catch (err) {
       console.error('Error submitting agent:', err);
       setStatus('failed');

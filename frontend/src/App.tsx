@@ -7,6 +7,7 @@ import { Challenge } from './pages/Challenge';
 import { Leaderboard } from './pages/Leaderboard';
 import { Profile } from './pages/Profile';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { Evaluation } from './pages/Evaluation';
 
 function App() {
   return (
@@ -36,6 +37,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Profile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/evaluation/:id"
+            element={
+              <ProtectedRoute>
+                <Evaluation />
               </ProtectedRoute>
             }
           />

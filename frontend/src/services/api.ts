@@ -110,8 +110,11 @@ export const deleteAgent = (id: string): Promise<void> =>
   api.delete(`/agents/${id}`).then(() => undefined);
 
 // Evaluations
-export const getEvaluations = (): ApiResponse<Evaluation[]> => 
-  api.get('/evaluations').then(response => response as Evaluation[]);
+// export const getEvaluations = (): ApiResponse<Evaluation[]> => 
+//   api.get('/evaluations').then(response => response as Evaluation[]);
+
+export const getEvaluationsByAgent = (agentId: string): ApiResponse<Evaluation[]> => 
+  api.get(`/evaluations/agent/${agentId}`).then(response => response as Evaluation[]);
 
 export const createEvaluation = (data: { agent_id: string; challenge_id: string }): ApiResponse<Evaluation> => 
   api.post('/evaluations', data).then(response => response as Evaluation);
