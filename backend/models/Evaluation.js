@@ -2,7 +2,17 @@ const supabase = require('../config/database');
 
 const Evaluation = {
   async create(evaluationData) {
-    return supabase.from('evaluations').insert(evaluationData);
+      const { data, error } = await supabase
+          .from('evaluations')
+          .insert(evaluationData)
+          .select();
+  
+      if (error) {
+          console.error("Supabase insert error:", error);
+          return { data: null, error };
+      }
+      console.log("Evaluation created:", data);
+      return { data, error: null };
   },
   
   async findById(id) {
