@@ -7,7 +7,10 @@ import os
 import sys
 import re
 import time
+import tempfile
+import importlib.util
 import traceback
+from typing import Any, Dict, List, Optional, Callable
 
 # Add WebArena to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'webarena'))
@@ -25,7 +28,7 @@ def color_text(text, color):
     """Add color to terminal text."""
     return f"{color}{text}{RESET}"
 
-def print_observation(obs, max_lines=30):
+def print_observation(obs, max_lines=1000):
     """Print formatted observation for debugging."""
     print(color_text("\n=== PAGE OBSERVATION ===", CYAN))
     if isinstance(obs, dict) and "text" in obs:
@@ -169,6 +172,21 @@ def test_page_load(url):
         print(color_text(f"Error: {e}", RED))
         print(traceback.format_exc())
 
+def load_agent_function(agent_code: str):
+    with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as f:
+        f.write(agent_code.encode('utf-8'))
+        temp_module_path = f.name
+    
+    spec = importlib.util.spec_from_file_location("agent_module", temp_module_path)
+    agent_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(agent_module)
+    
+    if not hasattr(agent_module, 'agent_logic'):
+        raise ValueError("Agent code must contain an 'agent_logic' function")
+    
+    os.unlink(temp_module_path)
+    return agent_module.agent_logic
+
 def load_agent_from_file(file_path: str) -> Callable:
     """Load agent_logic function from a Python file."""
     print(color_text(f"Loading agent from {file_path}", BLUE))
@@ -190,6 +208,11 @@ def load_agent_from_file(file_path: str) -> Callable:
     
     print(color_text("Agent loaded successfully!", GREEN))
     return agent_module.agent_logic
+
+def successful(obs, success_criteria):
+    if success_criteria in obs.get('text', ''):
+        return True
+    return False
 
 def test_interactive_elements(url, agent_code):
     # Import WebArena components
@@ -229,9 +252,52 @@ def test_interactive_elements(url, agent_code):
     # Try interacting with the page after it's loaded
     print(color_text("\nTrying to identify interactable elements...", BLUE))
 
-    agent_logic = load_agent_from_file(agent_code)
+    agent_logic = load_agent_function(agent_code)
 
-    max_steps = 10
+    obs = agent_logic(obs)
+
+    max_steps = 25
+    for step in range(max_steps):
+        print(color_text(f"\n--- Step {step+1}/{max_steps} ---", MAGENTA))
+
+        print(color_text("Getting actions from agent...", BLUE))
+        try:
+            actions = agent_logic(obs)
+            if not isinstance(actions, list):
+                print(color_text("Actions from agent are not a list", YELLOW))
+                actions = [actions]
+            else:
+                print(color_text(f"Actions from agent are a list of {len(actions)} actions", GREEN))
+                for i, action in enumerate(actions):
+                    print(color_text(f"Action {i+1}/{len(actions)}: {action}", BLUE))
+            
+            if actions and len(actions) > 0:
+                for action in actions:
+                    action_command = create_id_based_action(action)
+                    print(color_text(f"Processing action: {action}", BLUE))
+                    obs, reward, terminated, truncated, info = env.step(action_command)
+                    print(color_text(f"✓ Action succeeded: {action}", GREEN))
+            else:
+                print(color_text("No actions from agent", YELLOW))
+            
+            print_observation(obs)
+
+            if successful(obs, 'No messages matched'):
+                print(color_text("Success criteria met!", GREEN))
+                break
+            else:
+                print(color_text("Success criteria not met :(", RED))
+
+            time.sleep(1)
+
+        except Exception as e:
+            print(color_text(f"Error executing agent: {str(e)}", RED))
+            print(color_text(traceback.format_exc(), RED))
+            break
+        
+    env.close()
+    print(color_text("Test complete", GREEN))
+    return None
     
 
 if __name__ == "__main__":
@@ -243,5 +309,5 @@ if __name__ == "__main__":
         url = sys.argv[1]
         agent_code = sys.argv[2]
     
-    test_page_load(url)
+    # test_page_load(url)
     test_interactive_elements(url, agent_code)

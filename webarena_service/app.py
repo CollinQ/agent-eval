@@ -1,49 +1,118 @@
-#!/usr/bin/env python
-# WebArena Evaluation Microservice
+#!/usr/bin/env python3
+"""
+WebArena Tester that properly waits for the full application load
+"""
 
 import os
 import sys
-import json
-import base64
 import re
-import traceback
-import importlib.util
+import time
 import tempfile
-from typing import Dict, List, Optional, Any
-import logging
-import asyncio
-import requests
-import concurrent.futures
+import importlib.util
+import traceback
+from typing import Any, Dict, List, Optional, Callable
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import requests
 
+# Add WebArena to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'webarena'))
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger("webarena_service")
+# Terminal colors for better readability
+RESET = "\033[0m"
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+BLUE = "\033[34m"
+MAGENTA = "\033[35m"
+CYAN = "\033[36m"
 
-# Create FastAPI app
-app = FastAPI(title="WebArena Evaluation Service")
+def color_text(text, color):
+    """Add color to terminal text."""
+    return f"{color}{text}{RESET}"
 
-# Enable CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def print_observation(obs, max_lines=1000):
+    """Print formatted observation for debugging."""
+    print(color_text("\n=== PAGE OBSERVATION ===", CYAN))
+    if isinstance(obs, dict) and "text" in obs:
+        text = obs["text"]
+        lines = text.split('\n')
+        total_lines = len(lines)
+        
+        # Print the first part
+        for i, line in enumerate(lines[:max_lines]):
+            # Highlight element IDs
+            highlighted = re.sub(r'\[(\d+)\]', color_text(r'[\1]', GREEN), line)
+            print(f"{i+1:3d}: {highlighted}")
+        
+        # If observation is longer, print a summary
+        if total_lines > max_lines:
+            print(color_text(f"... ({total_lines - max_lines} more lines) ...", YELLOW))
+    else:
+        print(obs)
+    print(color_text("=======================\n", CYAN))
 
-# ThreadPoolExecutor for running sync code
-thread_pool = concurrent.futures.ThreadPoolExecutor()
+def wait_for_full_application_load(env, timeout=60):
+    """
+    Wait for the application to fully load by checking for the loading indicator
+    and waiting for it to disappear.
+    """
+    from browser_env import create_id_based_action, create_playwright_action
+    
+    print(color_text(f"Waiting up to {timeout} seconds for full application load...", BLUE))
+    start_time = time.time()
+    check_interval = 1  # seconds between checks
+    
+    while time.time() - start_time < timeout:
+        # Get current observation
+        try:
+            # Try using a "noop" action to refresh the observation
+            try:
+                action = create_playwright_action('page.evaluate("window.scrollBy(0, 0)")')
+                obs, _, _, _, _ = env.step(action)
+            except Exception:
+                # If that fails, try a minimal click that shouldn't do anything
+                try:
+                    action = create_id_based_action("click [6]")  # Root WebArea
+                    obs, _, _, _, _ = env.step(action)
+                except:
+                    # Last resort - wait and use whatever observation we have
+                    pass
+            
+            text_obs = obs.get("text", "")
+            
+            # Check for loading indicators
+            loading_indicators = [
+                "Loading application",
+                "progressbar",
+                "loading",
+                "please wait"
+            ]
+            
+            if any(indicator.lower() in text_obs.lower() for indicator in loading_indicators):
+                elapsed = time.time() - start_time
+                print(color_text(f"Still loading ({elapsed:.1f}s elapsed)...", YELLOW))
+                time.sleep(check_interval)
+                continue
+            
+            # Check if we have substantial content (more than just loading elements)
+            if len(text_obs.split('\n')) > 15:  # Arbitrary threshold for "substantial content"
+                elapsed = time.time() - start_time
+                print(color_text(f"Application appears fully loaded after {elapsed:.1f}s", GREEN))
+                print_observation(obs)
+                return obs
+            
+            print(color_text("Waiting for more content...", YELLOW))
+            time.sleep(check_interval)
+            
+        except Exception as e:
+            print(color_text(f"Error checking load status: {e}", RED))
+            time.sleep(check_interval)
+    
+    print(color_text(f"Warning: Timeout after {timeout}s waiting for full load", RED))
+    return obs
 
-# Models
 class EvaluationRequest(BaseModel):
     evaluation_id: str
     agent_code: str
@@ -54,333 +123,157 @@ class EvaluationRequest(BaseModel):
 class EvaluationResponse(BaseModel):
     evaluation_id: str
     status: str
-    message: str
+    score: int
+    result: dict | None
 
-# Initialize WebArena environment in a function to avoid 
-# loading it when importing this module for testing
 def init_webarena_env(headless=True):
-    try:
-        # Import WebArena components
-        from browser_env import ScriptBrowserEnv, create_id_based_action
-        
-        # Initialize environment
-        env = ScriptBrowserEnv(
-            headless=headless,
-            observation_type="accessibility_tree",
-            current_viewport_only=True,
-            viewport_size={"width": 1280, "height": 720},
-        )
-        
-        return env, create_id_based_action
-    except ImportError as e:
-        logger.error(f"Failed to import WebArena: {e}")
-        raise
+    return ScriptBrowserEnv(
+        headless=headless,
+        observation_type="accessibility_tree",
+        current_viewport_only=True,
+        viewport_size={"width": 1280, "height": 720},
+    )
 
-
-# Function to load and execute agent code
 def load_agent_function(agent_code: str):
-    """Dynamically load agent function from the provided code."""
+    with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as f:
+        f.write(agent_code.encode('utf-8'))
+        temp_module_path = f.name
+    
+    spec = importlib.util.spec_from_file_location("agent_module", temp_module_path)
+    agent_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(agent_module)
+    
+    if not hasattr(agent_module, 'agent_logic'):
+        raise ValueError("Agent code must contain an 'agent_logic' function")
+    
+    os.unlink(temp_module_path)
+    return agent_module.agent_logic
+
+def successful(obs, success_criteria):
+    return success_criteria in obs.get('text', '')
+
+def callback(callback_url: str, response: EvaluationResponse):
+    print(color_text(f"Callback received: {response}", BLUE))
     try:
-        # Create a temporary module
-        with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as f:
-            f.write(agent_code.encode('utf-8'))
-            temp_module_path = f.name
-        
-        # Load the module
-        spec = importlib.util.spec_from_file_location("agent_module", temp_module_path)
-        agent_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(agent_module)
-        
-        # Check if agent_logic function exists
-        if not hasattr(agent_module, 'agent_logic'):
-            raise ValueError("Agent code must contain an 'agent_logic' function")
-        
-        agent_function = agent_module.agent_logic
-        
-        # Clean up
-        os.unlink(temp_module_path)
-        
-        return agent_function
+        response = requests.post(callback_url, json=response.model_dump())
     except Exception as e:
-        logger.error(f"Error loading agent code: {e}")
-        if os.path.exists(temp_module_path):
-            os.unlink(temp_module_path)
-        raise
+        print(color_text(f"Error parsing callback response: {e}", RED))
+        return
 
+def test_interactive_elements(request: EvaluationRequest):
+    # Import WebArena components
+    from browser_env import ScriptBrowserEnv, create_id_based_action, create_playwright_action
+    print(color_text("Successfully imported WebArena components", GREEN))
 
-# Function to find element IDs in accessibility tree based on selectors
-def find_element_id(selector: str, accessibility_tree: str) -> Optional[str]:
-    """Find element ID in accessibility tree that matches a CSS selector."""
-    # Remove the # or . prefix from the selector to get the element name or id
-    if selector.startswith('#'):
-        # ID selector - look for element with matching id
-        element_id = selector[1:]
+    response = EvaluationResponse(
+        evaluation_id=request.evaluation_id,
+        status="failed",)
+    
+    # Initialize environment
+    print(color_text("Initializing WebArena environment...", BLUE))
+    env = ScriptBrowserEnv(
+        headless=False,  # Make browser visible for debugging
+        slow_mo=300,     # Slow down for visibility
+        observation_type="accessibility_tree",
+        current_viewport_only=True,
+        viewport_size={"width": 1280, "height": 720},
+    )
+    print(color_text("Environment initialized", GREEN))
+    
+    # Navigate to the URL
+    print(color_text(f"Navigating to {url} using id_based_action", BLUE))
+    obs, info = env.reset()
+
+    print(color_text(f"Navigating to {url} using id_based_action", BLUE))
+    try:
+        obs, reward, terminated, truncated, info = env.step(
+            create_id_based_action(f"goto [{url}]")
+        )
+        print(color_text("Navigation initiated successfully", GREEN))
+    except Exception as e:
+        print(color_text(f"Error during navigation: {e}", RED))
+        print(traceback.format_exc())
+        env.close()
+        return
+    
+    # Wait for full application load
+    obs = wait_for_full_application_load(env, timeout=60)
+    
+    # Try interacting with the page after it's loaded
+    print(color_text("\nTrying to identify interactable elements...", BLUE))
+
+    agent_logic = load_agent_function(agent_code)
+
+    max_steps = 25
+    for step in range(max_steps):
+        print(color_text(f"\n--- Step {step+1}/{max_steps} ---", MAGENTA))
+
+        print(color_text("Getting actions from agent...", BLUE))
+        try:
+            actions = agent_logic(obs['text'])
+            if not isinstance(actions, list):
+                print(color_text("Actions from agent are not a list", YELLOW))
+                actions = [actions]
+            else:
+                print(color_text(f"Actions from agent are a list of {len(actions)} actions", GREEN))
+                for i, action in enumerate(actions):
+                    print(color_text(f"Action {i+1}/{len(actions)}: {action}", BLUE))
+            
+            if actions and len(actions) > 0:
+                for action in actions:
+                    action_command = create_id_based_action(action)
+                    print(color_text(f"Processing action: {action}", BLUE))
+                    obs, reward, terminated, truncated, info = env.step(action_command)
+                    print(color_text(f"✓ Action succeeded: {action}", GREEN))
+            else:
+                print(color_text("No actions from agent", YELLOW))
+            
+            print_observation(obs)
+
+            if successful(obs, 'No messages matched'):
+                print(color_text("Success criteria met!", GREEN))
+                break
+            else:
+                print(color_text("Success criteria not met :(", RED))
+
+            time.sleep(1)
+
+        except Exception as e:
+            print(color_text(f"Error executing agent: {str(e)}", RED))
+            print(color_text(traceback.format_exc(), RED))
+            break
         
-        # Try to find elements with matching id or name
-        # Example pattern: [123] textbox 'name' or [123] textbox id='name'
-        patterns = [
-            rf'\[(\d+)\][^\[\]]*?id=[\'"]?{re.escape(element_id)}[\'"]?',
-            rf'\[(\d+)\][^\[\]]*?name=[\'"]?{re.escape(element_id)}[\'"]?',
-            rf'\[(\d+)\][^\[\]]*?[\'"]?{re.escape(element_id)}[\'"]?',
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, accessibility_tree)
-            if match:
-                return match.group(1)
-    
-    elif selector.startswith('.'):
-        # Class selector - look for element with matching class
-        element_class = selector[1:]
-        # Find elements with matching class
-        pattern = rf'\[(\d+)\][^\[\]]*?class=[\'"]?.*?{re.escape(element_class)}.*?[\'"]?'
-        match = re.search(pattern, accessibility_tree)
-        if match:
-            return match.group(1)
-    
-    else:
-        # Tag selector - look for matching tag
-        tag = selector
-        # Find elements with matching tag
-        pattern = rf'\[(\d+)\] {re.escape(tag)}'
-        match = re.search(pattern, accessibility_tree)
-        if match:
-            return match.group(1)
-    
-    # If no match found, look for elements with similar text or role
-    fallback_patterns = [
-        # Look for elements containing the selector text in their name
-        rf'\[(\d+)\][^\[\]]*?[\'"].*?{re.escape(selector)}.*?[\'"]',
-        # Look for buttons/links with matching text
-        rf'\[(\d+)\] (?:button|link) [\'"].*?{re.escape(selector)}.*?[\'"]',
-        # Special case for common elements like submit buttons
-        rf'\[(\d+)\] button [\'"](?:submit|Search|Send|OK|Continue)[\'"]' if selector.lower() in ['submit', 'search', 'send', 'ok', 'continue'] else None,
-    ]
-    
-    for pattern in fallback_patterns:
-        if pattern:
-            match = re.search(pattern, accessibility_tree)
-            if match:
-                return match.group(1)
-    
-    logger.warning(f"Could not find element ID for selector: {selector}")
+    env.close()
+    print(color_text("Test complete", GREEN))
     return None
 
+# FastAPI setup
+app = FastAPI(title="WebArena Evaluation Service")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Function to convert agent actions to WebArena format
-def convert_to_webarena_action(action: Dict[str, Any], 
-                              create_id_based_action_fn, 
-                              accessibility_tree: str):
-    """Convert agent-format action to WebArena format."""
-    action_type = action.get("type")
-    selector = action.get("selector")
-    
-    # If the agent has already provided an element_id, use it directly
-    if "element_id" in action:
-        element_id = action["element_id"]
-    else:
-        # Otherwise, try to find the element ID based on the selector
-        element_id = find_element_id(selector, accessibility_tree)
-    
-    # If we couldn't find an element ID, log warning and use a fallback
-    if not element_id:
-        logger.warning(f"Could not find element ID for selector: {selector}")
-        # Fallback: Just use the selector as provided (this likely won't work but better than failing)
-        element_id = selector
-    
-    if action_type == "click":
-        return create_id_based_action_fn(f"click [{element_id}]")
-    elif action_type == "input":
-        value = action.get("value", "")
-        return create_id_based_action_fn(f"type [{element_id}] {value}")
-    elif action_type == "select":
-        value = action.get("value", "")
-        return create_id_based_action_fn(f"select [{element_id}] {value}")
-    else:
-        raise ValueError(f"Unsupported action type: {action_type}")
-
-
-# Synchronous evaluation function that will run in a thread
-def run_evaluation_sync(
-    evaluation_id: str,
-    agent_code: str,
-    challenge_url: str,
-    success_criteria: str
-):
-    """Run WebArena evaluation synchronously (to be called from a thread)."""
-    logger.info(f"Starting evaluation {evaluation_id} for URL: {challenge_url}")
-    
-    result = {
-        "evaluation_id": evaluation_id,
-        "status": "failed",
-        "success": False,
-        "error": None,
-        "steps": 0,
-        "screenshot": None
-    }
-    
-    try:
-        # Initialize WebArena environment
-        env, create_id_based_action_fn = init_webarena_env(headless=True)
-        
-        # Load agent function
-        agent_function = load_agent_function(agent_code)
-        
-        # Reset environment and navigate to the challenge URL
-        obs, info = env.reset(options={"url": challenge_url})
-        
-        # Set evaluation parameters
-        max_steps = 20  # Maximum number of steps for the agent
-        steps = 0
-        success = False
-        
-        # Evaluation loop
-        while steps < max_steps:
-            # Get page observation
-            text_obs = obs.get("text", "")
-            
-            # Display observation for debugging
-            logger.info(f"Observation: {text_obs[:200]}...")
-            
-            # Get actions from agent
-            try:
-                actions = agent_function(text_obs)
-                
-                # Ensure actions is a list
-                if not isinstance(actions, list):
-                    logger.warning(f"Agent returned non-list: {actions}, converting to list")
-                    actions = [actions]
-                
-                # Execute each action
-                for action in actions:
-                    logger.info(f"Agent action: {action}")
-                    
-                    # Convert to WebArena format using the accessibility tree
-                    webarena_action = convert_to_webarena_action(
-                        action, 
-                        create_id_based_action_fn,
-                        text_obs  # Pass the accessibility tree
-                    )
-                    
-                    logger.info(f"WebArena action: {webarena_action}")
-                    
-                    # Execute action
-                    obs, reward, terminated, truncated, info = env.step(webarena_action)
-                    
-                    # Check for success criteria
-                    if success_criteria and success_criteria in obs.get("text", ""):
-                        success = True
-                        break
-                
-                steps += 1
-                
-                if success or terminated or truncated:
-                    break
-                    
-            except Exception as e:
-                logger.error(f"Error during agent execution: {e}")
-                logger.error(traceback.format_exc())
-                result["error"] = str(e)
-                break
-        
-        # Capture screenshot
-        try:
-            screenshot = env.render()
-            result["screenshot"] = base64.b64encode(screenshot).decode('utf-8')
-        except Exception as e:
-            logger.error(f"Failed to capture screenshot: {e}")
-        
-        # Update result
-        result["success"] = success
-        result["steps"] = steps
-        result["status"] = "completed"
-        
-        # Close environment
-        env.close()
-        
-    except Exception as e:
-        logger.error(f"Evaluation error: {e}")
-        logger.error(traceback.format_exc())
-        result["error"] = str(e)
-        result["status"] = "failed"
-    
-    return result
-
-
-# Async function to call the callback URL
-async def send_callback(callback_url: str, result: dict):
-    """Send the evaluation result to the callback URL."""
-    try:
-        response = requests.post(callback_url, json=result)
-        logger.info(f"Callback response: {response.status_code}, {response.text}")
-    except Exception as e:
-        logger.error(f"Callback error: {e}")
-
-
-# Async function that orchestrates the evaluation
-async def run_evaluation(
-    evaluation_id: str,
-    agent_code: str,
-    challenge_url: str,
-    success_criteria: str,
-    callback_url: str
-):
-    """Run evaluation in a thread and send results via callback."""
-    loop = asyncio.get_running_loop()
-    
-    # Run the sync evaluation in a thread
-    result = await loop.run_in_executor(
-        thread_pool,
-        run_evaluation_sync,
-        evaluation_id,
-        agent_code,
-        challenge_url,
-        success_criteria
-    )
-    
-    # Send callback
-    await send_callback(callback_url, result)
-    
-    return result
-
-
-# Routes
 @app.post("/api/evaluate", response_model=EvaluationResponse)
 async def evaluate(request: EvaluationRequest, background_tasks: BackgroundTasks):
-    logger.info("Received evaluation request: %s", request.json())
-    logger.debug("Evaluation Data: %s", request.dict())
-    logger.info("Successfully processed evaluation for ID: %s", request.evaluation_id)
+    logger.info(f"Received evaluation request: {request.json()}")
     
     try:
-        # Add evaluation to background tasks
         background_tasks.add_task(
-            run_evaluation,
-            evaluation_id=request.evaluation_id,
-            agent_code=request.agent_code,
-            challenge_url=request.challenge_url,
-            success_criteria=request.success_criteria,
-            callback_url=request.callback_url
+            lambda: test_interactive_elements(request)
         )
-        
-        logger.info("Evaluation request added to background tasks")
-        logger.info("Sending response to client")
-        
         return EvaluationResponse(
             evaluation_id=request.evaluation_id,
             status="running",
             message="Evaluation started successfully"
         )
     except Exception as e:
-        logger.error("Error processing evaluation: %s", str(e))
+        logger.error(f"Evaluation failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "ok"}
-
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
