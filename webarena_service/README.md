@@ -19,18 +19,6 @@ None required by default, but the service can be configured with:
 
 ### Installation
 
-#### Using Docker (recommended)
-
-1. Build the Docker image:
-   ```bash
-   docker build -t webarena-service .
-   ```
-
-2. Run the container:
-   ```bash
-   docker run -p 8000:8000 webarena-service
-   ```
-
 #### Local Installation
 
 1. Ensure you have Python 3.10+ installed
@@ -98,22 +86,15 @@ Health check endpoint.
 The agent code should define a function called `agent_logic` that takes a text observation (HTML/accessibility tree) from WebArena and returns a list of actions to perform:
 
 ```python
-def agent_logic(env):
+def agent_logic(obs_text: str):
     """
     Takes the WebArena environment as input.
     Returns a dictionary of actions for WebArena to execute.
     """
-    return [
-        {"type": "input", "selector": "#name", "value": "John Doe"},
-        {"type": "input", "selector": "#email", "value": "john@example.com"},
-        {"type": "click", "selector": "#submit"}
-    ]
+    return ["click [element]", "press [key_comb]"]
 ```
 
-The supported action types are:
-- `click`: Click on an element
-- `input`: Type text into an input field
-- `select`: Select an option from a dropdown
+The supported action types are found on page 5 of: [https://arxiv.org/pdf/2307.13854.pdf](https://arxiv.org/pdf/2307.13854.pdf)
 
 ## Integration with Main Application
 
