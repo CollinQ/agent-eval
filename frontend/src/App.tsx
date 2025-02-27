@@ -8,6 +8,7 @@ import { Leaderboard } from './pages/Leaderboard';
 import { Profile } from './pages/Profile';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Evaluation } from './pages/Evaluation';
+import { Evaluations } from './pages/Evaluations';
 
 function App() {
   return (
@@ -41,7 +42,15 @@ function App() {
             }
           />
           <Route
-            path="/evaluation/:id"
+            path="/evaluation/:agentId"
+            element={
+              <ProtectedRoute>
+                <Evaluations />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/evaluation/:agentId/:id"
             element={
               <ProtectedRoute>
                 <Evaluation />

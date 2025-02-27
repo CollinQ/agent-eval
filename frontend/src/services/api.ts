@@ -100,7 +100,7 @@ export const getAgentsByUser = async (userId: string): Promise<Agent[]> => {
 export const createAgent = (data: Omit<Agent, 'id' | 'created_at'>): ApiResponse<Agent> => 
   api.post('/agents', data).then(response => response as Agent);
 
-export const getAgent = (id: string): ApiResponse<Agent> => 
+export const getAgent = (id: string): ApiResponse<Agent[]> => 
   api.get(`/agents/${id}`).then(response => response as Agent);
 
 export const updateAgent = (id: string, data: Partial<Agent>): ApiResponse<Agent> => 
