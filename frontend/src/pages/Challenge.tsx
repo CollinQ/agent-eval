@@ -14,12 +14,10 @@ const sampleCode = `def agent_logic(obs_text: str):
     """
     Takes the WebArena environment as input.
     Returns a dictionary of actions for WebArena to execute.
+
+    The supported action types are found on page 5 of: [https://arxiv.org/pdf/2307.13854.pdf](https://arxiv.org/pdf/2307.13854.pdf)
     """
-    return [
-        {"type": "input", "selector": "#name", "value": "John Doe"},
-        {"type": "input", "selector": "#email", "value": "john@example.com"},
-        {"type": "click", "selector": "#submit"}
-    ]`;
+    return ["click [element]", "press [key_comb]"]`;
 
 export function Challenge() {
   const { id } = useParams();

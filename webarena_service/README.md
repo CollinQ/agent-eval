@@ -90,6 +90,8 @@ def agent_logic(obs_text: str):
     """
     Takes the WebArena environment as input.
     Returns a dictionary of actions for WebArena to execute.
+
+    The supported action types are found on page 5 of: [https://arxiv.org/pdf/2307.13854.pdf](https://arxiv.org/pdf/2307.13854.pdf)
     """
     return ["click [element]", "press [key_comb]"]
 ```
