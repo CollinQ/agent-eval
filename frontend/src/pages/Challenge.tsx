@@ -10,7 +10,7 @@ import { Editor } from '@monaco-editor/react';
 import type { OnMount, OnChange } from '@monaco-editor/react';
 import { useRef } from 'react';
 
-const sampleCode = `def agent_logic(env):
+const sampleCode = `def agent_logic(obs_text: str):
     """
     Takes the WebArena environment as input.
     Returns a dictionary of actions for WebArena to execute.

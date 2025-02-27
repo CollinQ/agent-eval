@@ -22,10 +22,10 @@ const evaluationController = {
         status: 'queued',
       };
 
-      console.log("Evaluation Data:", evaluationData);
+      //console.log("Evaluation Data:", evaluationData);
       const { data, error } = await Evaluation.create(evaluationData);
 
-      console.log("Evaluation Response:", { data, error });
+      //console.log("Evaluation Response:", { data, error });
       
       if (error) throw error;
       
@@ -39,37 +39,40 @@ const evaluationController = {
           throw new Error('Agent or challenge not found');
         }
         
-        console.log(`Starting evaluation for agent: ${agent_id}, challenge: ${challenge_id}`);
+        //console.log(`agentData:`, agentData);
+        //console.log(`challengeData:`, challengeData);
+        //console.log(`Starting evaluation for agent: ${agent_id}, challenge: ${challenge_id}`);
         
         // Call WebArena microservice
         const evaluationRequest = {
-          evaluation_id: data.id,
-          agent_code: agentData.code,
+          evaluation_id: data[0].id,
+          agent_code: agentData[0].code,
           challenge_url: challengeData.url,
           success_criteria: challengeData.success_criteria,
-          callback_url: `${BACKEND_URL}/api/evaluations/${data.id}/callback`
+          callback_url: `${BACKEND_URL}/api/evaluations/${data[0].id}/callback`
         };
         
         // Send request to WebArena microservice
+        //console.log('Sending evaluation request to WebArena:', evaluationRequest);
         axios.post(`${WEBARENA_SERVICE_URL}/api/evaluate`, evaluationRequest)
           .then(response => {
-            console.log('WebArena evaluation started:', response.data);
+            //console.log('WebArena evaluation started:', response.data);
           })
           .catch(error => {
             console.error('Error starting WebArena evaluation:', error);
-            Evaluation.update(data.id, { 
-              status: 'error',
+            Evaluation.update(data[0].id, { 
+              status: 'failed',
               result: { error: 'Failed to start evaluation' }
             });
           });
         
         // Update status to running
-        await Evaluation.update(data.id, { status: 'running' });
+        await Evaluation.update(data[0].id, { status: 'running' });
       } catch (evalError) {
         console.error('Failed to start evaluation:', evalError);
         // Don't fail the request, just update the status
-        await Evaluation.update(data.id, { 
-          status: 'error',
+        await Evaluation.update(data[0].id, { 
+          status: 'failed',
           result: { error: evalError.message }
         });
       }
@@ -157,15 +160,17 @@ const evaluationController = {
   async evaluationCallback(req, res) {
     try {
       const { id } = req.params;
-      const { success, steps, status, result } = req.body;
+      const { steps_taken, score, status, result, logs } = req.body;
       
-      console.log(`Received callback for evaluation ${id}:`, req.body);
+      //console.log(`Received callback for evaluation ${id}:`, req.body);
       
       const updateData = {
         status: status || 'completed',
-        score: success ? 100 : 0,  // Simple scoring: 100 for success, 0 for failure
-        steps_taken: steps,
-        result: result
+        score: score || 0,  // Simple scoring: 100 for success, 0 for failure
+        steps_taken: steps_taken || 0,
+        result: result,
+        completed_at: new Date(),
+        logs: logs || []
       };
       
       const { data, error } = await Evaluation.update(id, updateData);

@@ -127,6 +127,7 @@ class EvaluationResponse(BaseModel):
     steps_taken: Optional[int] = None
     result: Optional[Dict] = None
     message: Optional[str] = None
+    logs: Optional[List[str]] = None
 
 def init_webarena_env(headless=True):
     from browser_env import ScriptBrowserEnv
@@ -159,6 +160,15 @@ def callback(callback_url: str, response: EvaluationResponse):
     print(color_text(f"Callback received: {response}", BLUE))
     try:
         response_dict = response.model_dump()
+        
+        # If result contains an image with ndarray, handle it
+        if response_dict.get('result') and response_dict['result'].get('image') is not None:
+            # Option 1: Convert to list
+            # response_dict['result']['image'] = response_dict['result']['image'].tolist()
+            
+            # Option 2: Remove the image
+            del response_dict['result']['image']
+            
         print(color_text(f"Sending callback to {callback_url}: {response_dict}", BLUE))
         response = requests.post(callback_url, json=response_dict)
     except Exception as e:
@@ -175,7 +185,9 @@ def test_interactive_elements(request: EvaluationRequest):
         status="failed",
         score=0,
         steps_taken=0,
-        result=None)
+        result=None,
+        logs=[],
+        )
     
     # Initialize environment
     print(color_text("Initializing WebArena environment...", BLUE))
@@ -228,6 +240,7 @@ def test_interactive_elements(request: EvaluationRequest):
             
             if actions and len(actions) > 0:
                 for action in actions:
+                    response.logs.append(action)
                     action_command = create_id_based_action(action)
                     print(color_text(f"Processing action: {action}", BLUE))
                     obs, reward, terminated, truncated, info = env.step(action_command)
@@ -239,7 +252,7 @@ def test_interactive_elements(request: EvaluationRequest):
 
             if successful(obs, request.success_criteria):
                 print(color_text("Success criteria met!", GREEN))
-                response.status = "success"
+                response.status = "completed"
                 response.score = 100
                 response.steps_taken = step + 1
                 response.result = obs
